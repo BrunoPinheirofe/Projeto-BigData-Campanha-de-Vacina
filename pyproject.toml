@@ -1,0 +1,27 @@
+[project]
+name = "analise-influenza-brasil"
+version = "0.1.0"
+description = "Análise de dados de vacinação contra Influenza no Brasil (maio/2025 – maio/2026)"
+requires-python = ">=3.10"
+dependencies = [
+    "pyarrow>=14.0",
+    "pandas>=2.0",
+    "polars>=0.20",
+    "matplotlib>=3.7",
+    "seaborn>=0.13",
+    "plotly>=5.18",
+    "scipy>=1.10",
+    "streamlit>=1.28",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "jupyter>=1.0",
+    "black",
+    "ruff",
+]
+sih-sim = ["pysus"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
