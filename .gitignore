@@ -13,3 +13,4 @@ build/
 *.ipynb_checkpoints/
 relatorios/graficos/
 relatorios/tabelas/
+.venv/
