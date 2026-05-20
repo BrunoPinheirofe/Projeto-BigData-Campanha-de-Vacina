@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import os
 
 from config import UFS, REGIACOES, PERIODO_INICIO, PERIODO_FIM
 
@@ -55,9 +56,9 @@ st.sidebar.markdown("**Dados:** healthbr-data (S3) + PySUS")
 st.sidebar.markdown("[SI-PNI](https://dadosabertos.saude.gov.br) | [PySUS](https://github.com/AlertaDengue/pySUS)")
 
 
-aba1, aba2, aba3, aba4, aba5 = st.tabs([
+aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
     "📊 Panorama", "👥 Demografia", "🏥 Desfecho",
-    "⚠️ Gaps", "📋 Relatório",
+    "⚠️ Gaps", "📋 Relatório", "📅 Campanha 2026",
 ])
 
 with aba1:
@@ -132,3 +133,46 @@ with aba5:
     st.subheader("Dados Agregados")
     if st.button("Exportar Dados (CSV)"):
         st.info("Disponível após carregar os dados")
+
+with aba6:
+    st.header("Análise Detalhada - Campanha 2026 (Local)")
+    st.markdown("""
+    Esta seção apresenta os dados processados a partir dos arquivos locais de Janeiro e Fevereiro de 2026.
+    Os gráficos abaixo foram gerados para análise rápida da evolução da campanha no Maranhão.
+    """)
+
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Comparativo Mensal")
+        path_mensal = "src/vacinação/graficos/comparativo_mensal.png"
+        if os.path.exists(path_mensal):
+            st.image(path_mensal)
+        else:
+            st.warning("Gráfico 'comparativo_mensal.png' não encontrado. Rode o script de visualização.")
+
+    with col2:
+        st.subheader("Distribuição por Sexo")
+        path_sexo = "src/vacinação/graficos/distribuicao_sexo.png"
+        if os.path.exists(path_sexo):
+            st.image(path_sexo)
+        else:
+            st.warning("Gráfico 'distribuicao_sexo.png' não encontrado.")
+
+    st.markdown("---")
+    
+    st.subheader("Top Grupos de Atendimento")
+    path_grupos = "src/vacinação/graficos/grupos_atendimento.png"
+    if os.path.exists(path_grupos):
+        st.image(path_grupos, use_container_width=True)
+    else:
+        st.warning("Gráfico 'grupos_atendimento.png' não encontrado.")
+
+    st.markdown("---")
+    
+    st.subheader("Perfil Etário")
+    path_etario = "src/vacinação/graficos/perfil_etario.png"
+    if os.path.exists(path_etario):
+        st.image(path_etario, use_container_width=True)
+    else:
+        st.warning("Gráfico 'perfil_etario.png' não encontrado.")
