@@ -14,3 +14,4 @@ build/
 relatorios/graficos/
 relatorios/tabelas/
 .venv/
+*.csv

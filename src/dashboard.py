@@ -56,9 +56,9 @@ st.sidebar.markdown("**Dados:** healthbr-data (S3) + PySUS")
 st.sidebar.markdown("[SI-PNI](https://dadosabertos.saude.gov.br) | [PySUS](https://github.com/AlertaDengue/pySUS)")
 
 
-aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
+aba1, aba2, aba3, aba4, aba5, aba6, aba7 = st.tabs([
     "📊 Panorama", "👥 Demografia", "🏥 Desfecho",
-    "⚠️ Gaps", "📋 Relatório", "📅 Campanha 2026",
+    "⚠️ Gaps", "📋 Relatório", "📅 Campanha 2025", "📅 Campanha 2026",
 ])
 
 with aba1:
@@ -135,6 +135,56 @@ with aba5:
         st.info("Disponível após carregar os dados")
 
 with aba6:
+    st.header("Análise Avançada - Campanha 2025 (Big Data)")
+    st.markdown("""
+    Esta seção apresenta os dados consolidados da campanha de 2025, processados com técnicas de Big Data 
+    para lidar com o alto volume de registros (amostragem estatística e agregação regional).
+    """)
+
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("📈 Tendência Temporal")
+        path_tendencia = "src/vacinação/graficos/2025_01_tendencia_temporal.png"
+        if os.path.exists(path_tendencia):
+            st.image(path_tendencia)
+        else:
+            st.warning("Gráfico de tendência não encontrado.")
+
+    with col2:
+        st.subheader("🗺️ Cobertura por Região")
+        path_regiao = "src/vacinação/graficos/2025_02_cobertura_regiao.png"
+        if os.path.exists(path_regiao):
+            st.image(path_regiao)
+        else:
+            st.warning("Gráfico regional não encontrado.")
+
+    st.markdown("---")
+    
+    col3, col4 = st.columns(2)
+    with col3:
+        st.subheader("🧬 Densidade Etária (KDE)")
+        path_densidade = "src/vacinação/graficos/2025_03_densidade_etaria.png"
+        if os.path.exists(path_densidade):
+            st.image(path_densidade)
+        else:
+            st.warning("Gráfico de densidade não encontrado.")
+            
+    with col4:
+        st.subheader("📦 Variabilidade e Outliers (Box Plot)")
+        path_boxplot = "src/vacinação/graficos/2025_04_boxplot_regioes.png"
+        if os.path.exists(path_boxplot):
+            st.image(path_boxplot)
+        else:
+            st.warning("Box Plot não encontrado.")
+
+    st.markdown("---")
+    st.subheader("🔝 Top 10 Grupos Prioritários")
+    path_grupos_25 = "src/vacinação/graficos/2025_05_grupos_prioritarios.png"
+    if os.path.exists(path_grupos_25):
+        st.image(path_grupos_25, use_container_width=True)
+
+with aba7:
     st.header("Análise Detalhada - Campanha 2026 (Local)")
     st.markdown("""
     Esta seção apresenta os dados processados a partir dos arquivos locais de Janeiro e Fevereiro de 2026.
