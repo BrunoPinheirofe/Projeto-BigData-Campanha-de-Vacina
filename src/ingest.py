@@ -9,8 +9,15 @@ from config import (
 
 PYSUS_DISPONIVEL = False
 try:
-    from pysus.online_data.SIH import download as _download_sih
-    from pysus.online_data.SIM import download as _download_sim
+    from pysus.api._impl.databases import sih as _sih_api
+    from pysus.api._impl.databases import sim as _sim_api
+    
+    def _download_sih(uf, ano):
+        return _sih_api(state=uf, year=ano, month=list(range(1, 13)))
+        
+    def _download_sim(uf, ano):
+        return _sim_api(state=uf, year=ano)
+        
     PYSUS_DISPONIVEL = True
 except ImportError:
     pass
@@ -25,19 +32,67 @@ def get_s3_filesystem() -> fs.S3FileSystem:
     )
 
 
-def load_pni_table(filtro_uf: list[str] | None = None):
+def load_pni_uf_mes(
+    uf: str,
+    ano: str = "2025",
+    mes: str = "05",
+) -> "pa.Table":
     s3 = get_s3_filesystem()
+    path = f"{S3_BUCKET}ano={ano}/mes={mes}/uf={uf}/"
     dataset = pds.dataset(
-        S3_BUCKET,
+        path,
         filesystem=s3,
         format="parquet",
         partitioning="hive",
     )
-    conditions = [pc.field("ano").isin(ANOS)]
-    if filtro_uf:
-        conditions.append(pc.field("uf").isin(filtro_uf))
-    filtro = conditions[0] if len(conditions) == 1 else pc.and_(*conditions)
-    return dataset.to_table(filter=filtro, columns=COLUNAS_PNI)
+    return dataset.to_table(columns=COLUNAS_PNI)
+
+
+def load_pni_uf(
+    uf: str,
+    anos: list[str] | None = None,
+    meses: list[str] | None = None,
+) -> "pa.Table":
+    if anos is None:
+        anos = ANOS
+    if meses is None:
+        meses = [f"{m:02d}" for m in range(5, 13)]
+    import pyarrow.compute as pc
+    tables = []
+    for ano in anos:
+        for mes in meses:
+            try:
+                t = load_pni_uf_mes(uf, ano, mes)
+                tables.append(t)
+            except Exception:
+                continue
+    if not tables:
+        raise RuntimeError(f"Nenhum dado encontrado para UF={uf}")
+    import pyarrow as pa
+    return pa.concat_tables(tables)
+
+
+def load_pni_ufs(
+    ufs: list[str],
+    anos: list[str] | None = None,
+    meses: list[str] | None = None,
+) -> "pa.Table":
+    if anos is None:
+        anos = ANOS
+    if meses is None:
+        meses = [f"{m:02d}" for m in range(1, 13)]
+    import pyarrow as pa
+    tables = []
+    for uf in ufs:
+        try:
+            t = load_pni_uf(uf, anos, meses)
+            tables.append(t)
+            print(f"  {uf}: {t.num_rows:,} registros")
+        except RuntimeError as e:
+            print(f"  {uf}: {e}")
+    if not tables:
+        raise RuntimeError("Nenhum dado encontrado para as UFs fornecidas")
+    return pa.concat_tables(tables)
 
 
 def download_sih(uf: str, ano: int):

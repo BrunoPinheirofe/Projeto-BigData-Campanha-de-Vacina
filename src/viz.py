@@ -210,3 +210,57 @@ def timeline_regiao_plotly(df: pd.DataFrame) -> go.Figure:
     )
     fig.update_layout(template="plotly_white", hovermode="x unified")
     return fig
+
+
+def histograma_idade_plotly(df_agregado: pd.DataFrame) -> go.Figure:
+    fig = px.bar(
+        df_agregado, x="nu_idade_paciente", y="Quantidade",
+        title="Densidade Etária (Histograma)",
+        labels={"nu_idade_paciente": "Idade (Anos)", "Quantidade": "Quantidade"},
+        color_discrete_sequence=["skyblue"]
+    )
+    fig.update_layout(template="plotly_white")
+    return fig
+
+
+def boxplot_regioes_plotly(df_stats: pd.DataFrame) -> go.Figure:
+    fig = go.Figure()
+    for _, row in df_stats.iterrows():
+        fig.add_trace(go.Box(
+            x=[row["regiao"]],
+            q1=[row["q1"]],
+            median=[row["median"]],
+            q3=[row["q3"]],
+            lowerfence=[row["min"]],
+            upperfence=[row["max"]],
+            name=row["regiao"]
+        ))
+    fig.update_layout(
+        title="Variabilidade Etária por Região (Quartis Polars)",
+        template="plotly_white",
+        yaxis_title="Idade (Anos)"
+    )
+    fig.update_layout(template="plotly_white")
+    return fig
+
+
+def barra_grupos_prioritarios_plotly(df_grupos: pd.DataFrame) -> go.Figure:
+    # df_grupos deve vir pre-agregado com "Grupo de Atendimento" e "Total de Doses", ordenado
+    fig = px.bar(
+        df_grupos, x="Total de Doses", y="Grupo de Atendimento", orientation='h',
+        title="Top 10 Grupos Prioritários",
+        color="Total de Doses", color_continuous_scale="magma"
+    )
+    fig.update_layout(template="plotly_white")
+    return fig
+
+
+def barra_cobertura_regiao(df_reg: pd.DataFrame) -> go.Figure:
+    # df_reg pre-agregado com "Região" e "Total de Doses"
+    fig = px.bar(
+        df_reg, x="Região", y="Total de Doses", color="Região",
+        title="Cobertura Vacinal por Região (Total Absoluto)",
+    )
+    fig.update_layout(template="plotly_white")
+    return fig
+

@@ -3,12 +3,11 @@ sys.path.insert(0, "src")
 
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from transform import (
     filtra_sih_sim_influenza, tipa_pni, faixa_etaria,
     adiciona_regiao, adiciona_mes_ano, agrega_doses,
-    prepara_pni_completo,
 )
 
 
@@ -32,7 +31,7 @@ def test_faixa_etaria_limites():
 
 
 def test_adiciona_regiao():
-    df = pd.DataFrame({"sg_uf": ["SP", "BA", "AM"]})
+    df = pd.DataFrame({"sg_uf_paciente": ["SP", "BA", "AM"]})
     df = adiciona_regiao(df)
     assert list(df["regiao"]) == ["Sudeste", "Nordeste", "Norte"]
 
@@ -41,18 +40,17 @@ def test_adiciona_mes_ano():
     df = pd.DataFrame({"dt_vacina": [datetime(2025, 5, 15)]})
     df = adiciona_mes_ano(df)
     assert df["mes"].iloc[0] == 5
-    assert df["ano"].iloc[0] == 2025
+    assert df["ano_vacina"].iloc[0] == 2025
 
 
 def test_tipa_pni():
     df = pd.DataFrame({
         "dt_vacina": ["2025-05-15"],
-        "dt_nascimento": ["2000-01-01"],
+        "nu_idade_paciente": ["30"],
     })
     df = tipa_pni(df)
     assert pd.api.types.is_datetime64_any_dtype(df["dt_vacina"])
-    assert pd.api.types.is_datetime64_any_dtype(df["dt_nascimento"])
-    assert df["idade"].iloc[0] > 20
+    assert df["nu_idade_paciente"].iloc[0] == 30
 
 
 def test_filtra_sih_sim_influenza():

@@ -21,16 +21,18 @@ def cobertura_por_uf(doses_agg: pd.DataFrame) -> pd.DataFrame:
         "RO": 1_800_000, "TO": 1_600_000, "AC": 900_000,
         "AP": 900_000, "RR": 650_000,
     }
-    doses_uf = doses_agg.groupby("sg_uf")["total_doses"].sum().reset_index()
-    doses_uf["populacao"] = doses_uf["sg_uf"].map(pop_uf)
+    col_uf = "sg_uf_paciente" if "sg_uf_paciente" in doses_agg.columns else "sg_uf"
+    doses_uf = doses_agg.groupby(col_uf)["total_doses"].sum().reset_index()
+    doses_uf["populacao"] = doses_uf[col_uf].map(pop_uf)
     doses_uf["cobertura_100k"] = (doses_uf["total_doses"] / doses_uf["populacao"]) * 100_000
     doses_uf["cobertura_pct"] = (doses_uf["total_doses"] / doses_uf["populacao"]) * 100
     return doses_uf.sort_values("cobertura_100k", ascending=False).reset_index(drop=True)
 
 
 def cobertura_por_regiao(doses_agg: pd.DataFrame) -> pd.DataFrame:
+    col_uf = "sg_uf_paciente" if "sg_uf_paciente" in doses_agg.columns else "sg_uf"
     uf_to_regiao = {uf: reg for reg, ufs in REGIACOES.items() for uf in ufs}
-    doses_agg["regiao"] = doses_agg["sg_uf"].map(uf_to_regiao)
+    doses_agg["regiao"] = doses_agg[col_uf].map(uf_to_regiao)
     return doses_agg.groupby("regiao")["total_doses"].sum().reset_index().sort_values("total_doses", ascending=False)
 
 
@@ -44,19 +46,21 @@ def cobertura_por_faixa_etaria(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def cobertura_por_sexo(df: pd.DataFrame) -> pd.DataFrame:
+    col_sexo = "tp_sexo_paciente" if "tp_sexo_paciente" in df.columns else "co_sexo"
     return (
-        df.groupby("co_sexo")
+        df.groupby(col_sexo)
         .size()
         .reset_index(name="total_doses")
     )
 
 
 def cobertura_por_raca(df: pd.DataFrame) -> pd.DataFrame:
+    col_raca = "co_raca_cor_paciente" if "co_raca_cor_paciente" in df.columns else "co_raca_cor"
     mapa_raca = {
         "1": "Branca", "2": "Preta", "3": "Amarela",
         "4": "Parda", "5": "Indígena",
     }
-    df["raca_desc"] = df["co_raca_cor"].map(mapa_raca).fillna("Sem informação")
+    df["raca_desc"] = df[col_raca].map(mapa_raca).fillna("Sem informação")
     return (
         df.groupby("raca_desc")
         .size()
@@ -84,9 +88,10 @@ def gap_score(
     col_internacoes: str = "total_internacoes",
 ) -> pd.DataFrame:
     if internacoes_uf is not None:
+        col_uf = "sg_uf_paciente" if "sg_uf_paciente" in doses_uf.columns else "sg_uf"
         merged = doses_uf.merge(
-            internacoes_uf[["sg_uf", col_internacoes]],
-            on="sg_uf", how="left",
+            internacoes_uf[[col_uf, col_internacoes]],
+            on=col_uf, how="left",
         ).fillna(0)
         max_doses = merged[col_doses].max()
         max_internacoes = merged[col_internacoes].max()
@@ -100,8 +105,10 @@ def gap_score(
 
 
 def ranking_municipios_criticos(df: pd.DataFrame, top_n: int = 20) -> pd.DataFrame:
+    col_mun = "co_municipio_paciente" if "co_municipio_paciente" in df.columns else "co_municipio_ibge"
+    col_uf = "sg_uf_paciente" if "sg_uf_paciente" in df.columns else "sg_uf"
     agg = (
-        df.groupby(["co_municipio_ibge", "sg_uf"])
+        df.groupby([col_mun, col_uf])
         .size()
         .reset_index(name="total_doses")
         .sort_values("total_doses", ascending=True)
@@ -111,21 +118,25 @@ def ranking_municipios_criticos(df: pd.DataFrame, top_n: int = 20) -> pd.DataFra
 
 
 def serie_temporal_mensal(df: pd.DataFrame) -> pd.DataFrame:
+    col_ano = "ano_vacina" if "ano_vacina" in df.columns else "ano"
     return (
-        df.groupby(["ano", "mes"])
+        df.groupby([col_ano, "mes"])
         .size()
         .reset_index(name="total_doses")
-        .sort_values(["ano", "mes"])
+        .sort_values([col_ano, "mes"])
     )
 
 
 def resumo_metricas(df: pd.DataFrame, doses_agg: pd.DataFrame) -> dict:
+    col_uf = "sg_uf_paciente" if "sg_uf_paciente" in df.columns else "sg_uf"
+    col_mun = "co_municipio_paciente" if "co_municipio_paciente" in df.columns else "co_municipio_ibge"
+    col_sexo = "tp_sexo_paciente" if "tp_sexo_paciente" in df.columns else "co_sexo"
     return {
         "total_doses": int(len(df)),
-        "media_diaria": round(len(df) / (365 + 30), 0),
-        "ufs_atendidas": int(df["sg_uf"].nunique()),
-        "municipios_atendidos": int(df["co_municipio_ibge"].nunique()),
-        "media_idade": round(df["idade"].mean(), 1),
-        "pct_feminino": round((df["co_sexo"] == "F").mean() * 100, 1),
-        "pct_masculino": round((df["co_sexo"] == "M").mean() * 100, 1),
+        "media_diaria": round(len(df) / 395, 0),
+        "ufs_atendidas": int(df[col_uf].nunique()),
+        "municipios_atendidos": int(df[col_mun].nunique()),
+        "media_idade": round(df["nu_idade_paciente"].mean(), 1),
+        "pct_feminino": round((df[col_sexo] == "F").mean() * 100, 1),
+        "pct_masculino": round((df[col_sexo] == "M").mean() * 100, 1),
     }

@@ -26,9 +26,11 @@ CID_INFLUENZA = ["J10", "J11"]
 CID_INFLUENZA_AMPLIADO = ["J09", "J10", "J11", "J12", "J13", "J14", "J15", "J16", "J17", "J18"]
 
 COLUNAS_PNI = [
-    "dt_vacina", "ds_vacina", "co_dose", "sg_uf",
-    "co_municipio_ibge", "dt_nascimento", "co_sexo",
-    "co_raca_cor", "co_categoria",
+    "dt_vacina", "ds_vacina", "co_dose_vacina", "ds_dose_vacina",
+    "sg_uf_paciente", "co_municipio_paciente", "tp_sexo_paciente",
+    "co_raca_cor_paciente", "nu_idade_paciente",
+    "co_vacina_categoria_atendimento", "ds_vacina_categoria_atendimento",
+    "co_vacina_grupo_atendimento", "ds_vacina_grupo_atendimento",
 ]
 
 PNEUMONIA_CIDS = ["J12", "J13", "J14", "J15", "J16", "J17", "J18"]

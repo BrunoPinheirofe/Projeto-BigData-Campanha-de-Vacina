@@ -2,13 +2,79 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import os
+import io
+import polars as pl
 
 from config import UFS, REGIACOES, PERIODO_INICIO, PERIODO_FIM
+import viz
 
+# Estética Premium (Glassmorphism e gradientes)
 st.set_page_config(
     page_title="Análise Vacinação Influenza",
     page_icon="💉",
     layout="wide",
+)
+
+st.markdown(
+    """
+<style>
+    /* Estilo do Main e Background */
+    .stApp {
+        background: linear-gradient(135deg, #0e1117 0%, #17202A 100%);
+        color: #e0e0e0;
+        font-family: 'Inter', sans-serif;
+    }
+    
+    /* Cards das Métricas */
+    div[data-testid="metric-container"] {
+        background-color: rgba(255, 255, 255, 0.05);
+        border-radius: 12px;
+        padding: 20px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        transition: transform 0.2s ease-in-out;
+    }
+    div[data-testid="metric-container"]:hover {
+        transform: translateY(-5px);
+        border: 1px solid rgba(52, 152, 219, 0.5);
+    }
+    
+    /* Cores das Métricas */
+    div[data-testid="metric-container"] > div {
+        color: #e0e0e0;
+    }
+    
+    /* Títulos */
+    h1, h2, h3 {
+        color: #3498db !important;
+        font-weight: 700;
+    }
+    
+    /* Sidebar */
+    section[data-testid="stSidebar"] {
+        background-color: #11151c;
+        border-right: 1px solid rgba(255,255,255,0.05);
+    }
+    
+    /* Tab headers */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 8px 8px 0px 0px;
+        padding: 10px 20px;
+        background-color: rgba(255, 255, 255, 0.05);
+        color: #aaaaaa;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #3498db !important;
+        color: #ffffff !important;
+        font-weight: bold;
+    }
+</style>
+""",
+    unsafe_allow_html=True,
 )
 
 st.title("💉 Análise da Vacinação contra Influenza no Brasil")
@@ -17,212 +83,525 @@ st.markdown("---")
 
 
 @st.cache_data
-def carregar_dados():
-    return pd.DataFrame()
-
-
-@st.cache_data
 def carregar_resultados():
-    return {}
+    df_2025 = pd.DataFrame()
+    df_2026 = pd.DataFrame()
+
+    try:
+        if os.path.exists("resultado_cruzamento_2025.csv"):
+            df_2025 = pd.read_csv("resultado_cruzamento_2025.csv")
+    except Exception:
+        pass
+
+    try:
+        if os.path.exists("resultado_cruzamento_2026.csv"):
+            df_2026 = pd.read_csv("resultado_cruzamento_2026.csv")
+    except Exception:
+        pass
+
+    df_resultado = pd.concat([df_2025, df_2026], ignore_index=True)
+    if (
+        not df_resultado.empty
+        and "mes" in df_resultado.columns
+        and "ano_vacina" in df_resultado.columns
+    ):
+        df_resultado["mes_ano"] = (
+            df_resultado["ano_vacina"].astype(str)
+            + "-"
+            + df_resultado["mes"].astype(str).str.zfill(2)
+        )
+
+    return df_resultado
 
 
-dados = carregar_dados()
+@st.cache_resource
+def carregar_dados_pni(ufs):
+    if not ufs:
+        return pl.DataFrame()
+
+    try:
+        with st.spinner(
+            f"⏳ Carregando dados para {len(ufs)} UF(s): {', '.join(ufs)}..."
+        ):
+            dfs = []
+            ufs_restantes = []
+            
+            # Tentar ler dos caches parquets locais gerados pelo pipeline_paralelo
+            for uf in ufs:
+                for ano in [2025, 2026]:
+                    cache_file = f"data/cache_pni_{ano}/uf_{uf}.parquet"
+                    if os.path.exists(cache_file):
+                        dfs.append(pl.read_parquet(cache_file))
+                    else:
+                        ufs_restantes.append(f"{uf} ({ano})")
+
+            if ufs_restantes:
+                st.warning(f"⚠️ Atenção: Os dados de {len(ufs_restantes)} UFs/Anos ainda não foram gerados pelo pipeline. (Ex: {', '.join(ufs_restantes[:3])}...). Execute o 'pipeline_paralelo.py' para gerar o cache local.")
+
+            if dfs:
+                return pl.concat(dfs, how="vertical_relaxed")
+            else:
+                return pl.DataFrame()
+    except Exception as e:
+        st.error(f"Erro ao carregar PNI: {e}")
+        return pl.DataFrame()
+
+
+# Carregar CSVs combinados
 resultados = carregar_resultados()
-
 
 st.sidebar.header("Filtros")
 
 uf_selecionadas = st.sidebar.multiselect(
-    "Unidades Federativas",
+    "Unidades Federativas (Filtro Demográfico)",
     options=UFS,
-    default=[],
-    placeholder="Todas as UFs",
+    default=UFS,
+    help="Selecione as UFs. Padrão: todas. Limpar seleção desabilita os gráficos demográficos.",
 )
 
 regiao_selecionada = st.sidebar.selectbox(
-    "Região",
+    "Região (Filtro Demográfico)",
     options=["Todas"] + list(REGIACOES.keys()),
     index=0,
 )
 
 faixa_etaria_selecionada = st.sidebar.multiselect(
-    "Faixa Etária",
+    "Faixa Etária (Filtro Demográfico)",
     options=["0-4", "5-11", "12-17", "18-29", "30-39", "40-49", "50-59", "60+"],
     default=[],
 )
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Dados:** healthbr-data (S3) + PySUS")
-st.sidebar.markdown("[SI-PNI](https://dadosabertos.saude.gov.br) | [PySUS](https://github.com/AlertaDengue/pySUS)")
+st.sidebar.markdown(
+    "[SI-PNI](https://dadosabertos.saude.gov.br) | [PySUS](https://github.com/AlertaDengue/pySUS)"
+)
+
+# Carregar dados demográficos
+dados_pni = carregar_dados_pni(uf_selecionadas)
+
+# Aplicar filtros
+if regiao_selecionada != "Todas" and not dados_pni.is_empty():
+    dados_pni = dados_pni.filter(pl.col("regiao") == regiao_selecionada)
+
+if faixa_etaria_selecionada and not dados_pni.is_empty():
+    dados_pni = dados_pni.filter(pl.col("faixa_etaria").is_in(faixa_etaria_selecionada))
 
 
-aba1, aba2, aba3, aba4, aba5, aba6, aba7 = st.tabs([
-    "📊 Panorama", "👥 Demografia", "🏥 Desfecho",
-    "⚠️ Gaps", "📋 Relatório", "📅 Campanha 2025", "📅 Campanha 2026",
-])
+aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs(
+    [
+        "📊 Panorama",
+        "👥 Demografia",
+        "🏥 Desfecho",
+        "⚠️ Gaps",
+        "📊 Comparativo Anual",
+        "📅 Campanha",
+    ]
+)
 
 with aba1:
     st.header("Panorama Geral")
 
     col1, col2, col3, col4 = st.columns(4)
+
+    total_doses = resultados["total_doses"].sum() if not resultados.empty else 0
+    ufs_atendidas = (
+        resultados["sg_uf_paciente"].nunique() if not resultados.empty else 0
+    )
+
     with col1:
-        st.metric("Total de Doses (estimado)", "—")
+        st.metric("Total de Doses (Cruzamento)", f"{total_doses:,.0f}")
     with col2:
-        st.metric("UFs Atendidas", "—")
+        st.metric("UFs Atendidas", f"{ufs_atendidas}")
     with col3:
-        st.metric("Cobertura Média", "—")
+        st.metric(
+            "Total de Internações (Gripe)",
+            f"{resultados['internacoes'].sum() if 'internacoes' in resultados else 0:,.0f}",
+        )
     with col4:
-        st.metric("Municípios", "—")
+        st.metric(
+            "Óbitos (Gripe)",
+            f"{resultados['obitos'].sum() if 'obitos' in resultados else 0:,.0f}",
+        )
 
     col_esq, col_dir = st.columns(2)
     with col_esq:
-        st.subheader("Série Temporal")
-        st.info("Carregue os dados para visualizar")
+        st.subheader("Série Temporal (Vacinação)")
+        if not resultados.empty:
+            df_st = resultados.groupby("mes_ano")["total_doses"].sum().reset_index()
+            fig = viz.serie_temporal_plotly(df_st)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Sem dados para série temporal")
+
     with col_dir:
         st.subheader("Cobertura por UF")
-        st.info("Carregue os dados para visualizar")
+        if not resultados.empty:
+            df_uf = (
+                resultados.groupby("sg_uf_paciente")["total_doses"].sum().reset_index()
+            )
+            df_uf.rename(columns={"sg_uf_paciente": "sg_uf"}, inplace=True)
+            fig = viz.barra_cobertura_uf(df_uf, col_valor="total_doses")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Sem dados para cobertura UF")
 
 with aba2:
-    st.header("Perfil Demográfico")
+    st.header("Perfil Demográfico (Baseado em UFs Selecionadas)")
 
-    c1, c2 = st.columns(2)
-    with c1:
-        st.subheader("Distribuição por Faixa Etária")
-        st.info("Carregue os dados para visualizar")
-    with c2:
-        st.subheader("Distribuição por Sexo")
-        st.info("Carregue os dados para visualizar")
+    if not dados_pni.is_empty():
+        c1, c2 = st.columns(2)
+        with c1:
+            st.subheader("Distribuição por Faixa Etária")
+            df_fe = (
+                dados_pni.group_by("faixa_etaria").agg(pl.len().alias("total_doses"))
+            ).to_pandas()
+            st.plotly_chart(viz.barra_faixa_etaria(df_fe), use_container_width=True)
 
-    st.subheader("Distribuição por Raça/Cor")
-    st.info("Carregue os dados para visualizar")
+        with c2:
+            st.subheader("Distribuição por Sexo")
+            df_sex = (
+                dados_pni.group_by("tp_sexo_paciente")
+                .agg(pl.len().alias("total_doses"))
+            ).to_pandas()
+            df_sex.rename(columns={"tp_sexo_paciente": "co_sexo"}, inplace=True)
+            st.plotly_chart(viz.pizza_sexo(df_sex), use_container_width=True)
+
+        st.subheader("Distribuição por Raça/Cor")
+        mapa_raca = {
+            "1": "Branca",
+            "2": "Preta",
+            "3": "Amarela",
+            "4": "Parda",
+            "5": "Indígena",
+            "99": "Sem info",
+        }
+        df_raca = (
+            dados_pni.group_by("co_raca_cor_paciente")
+            .agg(pl.len().alias("total_doses"))
+        ).to_pandas()
+        df_raca["raca_desc"] = (
+            df_raca["co_raca_cor_paciente"].astype(str).map(mapa_raca).fillna("Outros")
+        )
+        st.plotly_chart(viz.barra_raca(df_raca), use_container_width=True)
+    else:
+        st.info("Carregando ou sem dados para Demografia. Tente ajustar os filtros.")
 
 with aba3:
-    st.header("Correlação Cobertura × Desfecho")
+    st.header("Correlação Cobertura × Desfecho (Vacinas vs Internações/Óbitos)")
 
-    c_esq, c_dir = st.columns(2)
-    with c_esq:
-        st.subheader("Cobertura × Internações")
-        st.info("Carregue os dados de SIH para visualizar")
-    with c_dir:
-        st.subheader("Cobertura × Óbitos")
-        st.info("Carregue os dados de SIM para visualizar")
+    if not resultados.empty:
+        c_esq, c_dir = st.columns(2)
+        with c_esq:
+            st.subheader("Cobertura × Internações")
+            if "internacoes" in resultados.columns:
+                df_corr = (
+                    resultados.groupby("sg_uf_paciente")[["total_doses", "internacoes"]]
+                    .sum()
+                    .reset_index()
+                )
+                df_corr.rename(
+                    columns={
+                        "sg_uf_paciente": "sg_uf",
+                        "internacoes": "taxa_internacoes",
+                        "total_doses": "cobertura_100k",
+                    },
+                    inplace=True,
+                )
+                st.plotly_chart(
+                    viz.scatter_cobertura_desfecho(df_corr), use_container_width=True
+                )
+            else:
+                st.info("Sem dados de internações")
 
-    st.subheader("Série Dupla: Doses × Desfecho")
-    st.info("Carregue os dados para visualizar")
+        with c_dir:
+            st.subheader("Cobertura × Óbitos")
+            if "obitos" in resultados.columns:
+                df_corr = (
+                    resultados.groupby("sg_uf_paciente")[["total_doses", "obitos"]]
+                    .sum()
+                    .reset_index()
+                )
+                df_corr.rename(
+                    columns={
+                        "sg_uf_paciente": "sg_uf",
+                        "obitos": "taxa_internacoes",
+                        "total_doses": "cobertura_100k",
+                    },
+                    inplace=True,
+                )
+                st.plotly_chart(
+                    viz.scatter_cobertura_desfecho(df_corr), use_container_width=True
+                )
+            else:
+                st.info("Sem dados de óbitos")
+
+        st.subheader("Série Dupla: Doses × Internações")
+        if "internacoes" in resultados.columns:
+            df_dupla = (
+                resultados.groupby("mes_ano")[["total_doses", "internacoes"]]
+                .sum()
+                .reset_index()
+            )
+            st.plotly_chart(
+                viz.serie_dupla_plotly(df_dupla, y2="internacoes"),
+                use_container_width=True,
+            )
+    else:
+        st.info("Carregue os dados para visualizar")
 
 with aba4:
-    st.header("Análise de Gaps")
+    st.header("Análise de Gaps (Gap Score)")
 
-    c1, c2 = st.columns(2)
-    with c1:
-        st.subheader("Ranking de UFs Críticas")
-        st.info("Carregue os dados para visualizar")
-    with c2:
-        st.subheader("Gap Score")
-        st.info("Carregue os dados para visualizar")
+    if not resultados.empty and "internacoes" in resultados.columns:
+        c1, c2 = st.columns(2)
 
-    st.subheader("Municípios com Menor Cobertura")
-    st.info("Carregue os dados para visualizar")
+        # Calcular Gap Score On-The-Fly
+        doses_uf = (
+            resultados.groupby("sg_uf_paciente")["total_doses"].sum().reset_index()
+        )
+        internacoes_uf = (
+            resultados.groupby("sg_uf_paciente")["internacoes"]
+            .sum()
+            .reset_index(name="total_internacoes")
+        )
+
+        from analysis import gap_score
+
+        gap_df = gap_score(doses_uf, internacoes_uf)
+        gap_df.rename(columns={"sg_uf_paciente": "sg_uf"}, inplace=True)
+
+        with c1:
+            st.subheader("Gap Score por UF")
+            st.plotly_chart(viz.treemap_gaps(gap_df), use_container_width=True)
+        with c2:
+            st.subheader("Relação Doses x Gap")
+            st.plotly_chart(viz.bubble_gap_analysis(gap_df), use_container_width=True)
+
+    else:
+        st.info("Sem dados suficientes para calcular Gaps.")
 
 with aba5:
-    st.header("Relatório")
+    st.header("📊 Comparativo Anual: 2025 vs 2026")
 
-    st.subheader("Principais Insights")
-    st.info("Os insights serão gerados após o carregamento dos dados")
+    if not resultados.empty and "ano_vacina" in resultados.columns:
+        df_2025 = resultados[resultados["ano_vacina"] == 2025]
+        df_2026 = resultados[resultados["ano_vacina"] == 2026]
 
-    st.subheader("Dados Agregados")
-    if st.button("Exportar Dados (CSV)"):
-        st.info("Disponível após carregar os dados")
+        def m(d):
+            return {
+                "doses": int(d["total_doses"].sum()) if not d.empty else 0,
+                "ufs": int(d["sg_uf_paciente"].nunique()) if not d.empty else 0,
+                "internacoes": (
+                    int(d["internacoes"].sum())
+                    if not d.empty and "internacoes" in d.columns
+                    else 0
+                ),
+                "obitos": (
+                    int(d["obitos"].sum())
+                    if not d.empty and "obitos" in d.columns
+                    else 0
+                ),
+            }
+
+        m25, m26 = m(df_2025), m(df_2026)
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Doses 2025", f"{m25['doses']:,}")
+        c2.metric(
+            "Doses 2026", f"{m26['doses']:,}", delta=f"{m26['doses'] - m25['doses']:+}"
+        )
+        c3.metric("Internações 2025", f"{m25['internacoes']:,}")
+        c4.metric(
+            "Internações 2026",
+            f"{m26['internacoes']:,}",
+            delta=f"{m26['internacoes'] - m25['internacoes']:+}",
+            delta_color="inverse",
+        )
+
+        if m25["obitos"] or m26["obitos"]:
+            c1, c2 = st.columns(2)
+            c1.metric("Óbitos 2025", f"{m25['obitos']:,}")
+            c2.metric(
+                "Óbitos 2026",
+                f"{m26['obitos']:,}",
+                delta=f"{m26['obitos'] - m25['obitos']:+}",
+                delta_color="inverse",
+            )
+
+        st.markdown("---")
+        col_esq, col_dir = st.columns(2)
+
+        with col_esq:
+            st.subheader("Doses por UF")
+            doses_uf = (
+                resultados.groupby(["sg_uf_paciente", "ano_vacina"])["total_doses"]
+                .sum()
+                .reset_index()
+            )
+            fig = px.bar(
+                doses_uf,
+                x="sg_uf_paciente",
+                y="total_doses",
+                color="ano_vacina",
+                barmode="group",
+                labels={
+                    "sg_uf_paciente": "UF",
+                    "total_doses": "Doses",
+                    "ano_vacina": "Ano",
+                },
+            )
+            fig.update_layout(template="plotly_white")
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col_dir:
+            st.subheader("Série Mensal Comparada")
+            serie = (
+                resultados.groupby(["mes_ano", "ano_vacina"])["total_doses"]
+                .sum()
+                .reset_index()
+            )
+            fig = px.line(
+                serie,
+                x="mes_ano",
+                y="total_doses",
+                color="ano_vacina",
+                markers=True,
+                labels={"mes_ano": "Mês", "total_doses": "Doses", "ano_vacina": "Ano"},
+            )
+            fig.update_layout(template="plotly_white", hovermode="x unified")
+            st.plotly_chart(fig, use_container_width=True)
+
+        csv_buffer = io.StringIO()
+        resultados.to_csv(csv_buffer, index=False)
+        st.download_button(
+            label="📥 Exportar Dados Consolidados (CSV)",
+            data=csv_buffer.getvalue(),
+            file_name="relatorio_influenza_cruzado.csv",
+            mime="text/csv",
+        )
+    else:
+        st.info("Carregue os dados do pipeline para visualizar o comparativo anual.")
 
 with aba6:
-    st.header("Análise Avançada - Campanha 2025 (Big Data)")
-    st.markdown("""
-    Esta seção apresenta os dados consolidados da campanha de 2025, processados com técnicas de Big Data 
-    para lidar com o alto volume de registros (amostragem estatística e agregação regional).
-    """)
+    ano_campanha = st.selectbox("Selecione o ano", ["2025", "2026", "Ambos"], index=0)
 
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("📈 Tendência Temporal")
-        path_tendencia = "src/vacinação/graficos/2025_01_tendencia_temporal.png"
-        if os.path.exists(path_tendencia):
-            st.image(path_tendencia)
+    if not dados_pni.is_empty():
+        if ano_campanha == "Ambos":
+            c_esq, c_dir = st.columns(2)
+            with c_esq:
+                st.subheader("📈 2025")
+                df_a = dados_pni.filter(pl.col("ano_vacina") == 2025)
+                if not df_a.is_empty():
+                    st.plotly_chart(
+                        viz.timeline_regiao_plotly(
+                            df_a.group_by(["mes_ano", "regiao"])
+                            .agg(pl.len().alias("total_doses"))
+                            .to_pandas()
+                        ),
+                        use_container_width=True,
+                    )
+                    st.plotly_chart(
+                        viz.barra_cobertura_regiao(
+                            df_a.group_by("regiao").agg(pl.len().alias("Total de Doses"))
+                            .rename({"regiao": "Região"}).to_pandas()
+                        ), use_container_width=True
+                    )
+                else:
+                    st.info("Sem dados para 2025")
+            with c_dir:
+                st.subheader("📈 2026")
+                df_b = dados_pni.filter(pl.col("ano_vacina") == 2026)
+                if not df_b.is_empty():
+                    st.plotly_chart(
+                        viz.timeline_regiao_plotly(
+                            df_b.group_by(["mes_ano", "regiao"])
+                            .agg(pl.len().alias("total_doses"))
+                            .to_pandas()
+                        ),
+                        use_container_width=True,
+                    )
+                    st.plotly_chart(
+                        viz.barra_cobertura_regiao(
+                            df_b.group_by("regiao").agg(pl.len().alias("Total de Doses"))
+                            .rename({"regiao": "Região"}).to_pandas()
+                        ), use_container_width=True
+                    )
+                else:
+                    st.info("Sem dados para 2026")
         else:
-            st.warning("Gráfico de tendência não encontrado.")
+            ano = int(ano_campanha)
+            df_filtrado = dados_pni.filter(pl.col("ano_vacina") == ano)
+            if not df_filtrado.is_empty():
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.subheader("📈 Tendência Temporal por Região")
+                    st.plotly_chart(
+                        viz.timeline_regiao_plotly(
+                            df_filtrado.group_by(["mes_ano", "regiao"])
+                            .agg(pl.len().alias("total_doses"))
+                            .to_pandas()
+                        ),
+                        use_container_width=True,
+                    )
+                with col2:
+                    st.subheader("🗺️ Cobertura por Região")
+                    st.plotly_chart(
+                        viz.barra_cobertura_regiao(
+                            df_filtrado.group_by("regiao").agg(pl.len().alias("Total de Doses"))
+                            .rename({"regiao": "Região"}).to_pandas()
+                        ),
+                        use_container_width=True,
+                    )
 
-    with col2:
-        st.subheader("🗺️ Cobertura por Região")
-        path_regiao = "src/vacinação/graficos/2025_02_cobertura_regiao.png"
-        if os.path.exists(path_regiao):
-            st.image(path_regiao)
-        else:
-            st.warning("Gráfico regional não encontrado.")
+                st.markdown("---")
+                col3, col4 = st.columns(2)
+                with col3:
+                    st.subheader("🧬 Densidade Etária")
+                    df_idade = (
+                        df_filtrado.group_by("nu_idade_paciente")
+                        .agg(pl.len().alias("Quantidade"))
+                        .sort("nu_idade_paciente")
+                        .to_pandas()
+                    )
+                    st.plotly_chart(
+                        viz.histograma_idade_plotly(df_idade),
+                        use_container_width=True,
+                    )
+                with col4:
+                    st.subheader("📦 Variabilidade Etária (Outliers)")
+                    df_stats = (
+                        df_filtrado.group_by("regiao").agg(
+                            pl.col("nu_idade_paciente").min().alias("min"),
+                            pl.col("nu_idade_paciente").quantile(0.25).alias("q1"),
+                            pl.col("nu_idade_paciente").median().alias("median"),
+                            pl.col("nu_idade_paciente").quantile(0.75).alias("q3"),
+                            pl.col("nu_idade_paciente").max().alias("max"),
+                        ).to_pandas()
+                    )
+                    st.plotly_chart(
+                        viz.boxplot_regioes_plotly(df_stats),
+                        use_container_width=True,
+                    )
 
-    st.markdown("---")
-    
-    col3, col4 = st.columns(2)
-    with col3:
-        st.subheader("🧬 Densidade Etária (KDE)")
-        path_densidade = "src/vacinação/graficos/2025_03_densidade_etaria.png"
-        if os.path.exists(path_densidade):
-            st.image(path_densidade)
-        else:
-            st.warning("Gráfico de densidade não encontrado.")
-            
-    with col4:
-        st.subheader("📦 Variabilidade e Outliers (Box Plot)")
-        path_boxplot = "src/vacinação/graficos/2025_04_boxplot_regioes.png"
-        if os.path.exists(path_boxplot):
-            st.image(path_boxplot)
-        else:
-            st.warning("Box Plot não encontrado.")
-
-    st.markdown("---")
-    st.subheader("🔝 Top 10 Grupos Prioritários")
-    path_grupos_25 = "src/vacinação/graficos/2025_05_grupos_prioritarios.png"
-    if os.path.exists(path_grupos_25):
-        st.image(path_grupos_25, use_container_width=True)
-
-with aba7:
-    st.header("Análise Detalhada - Campanha 2026 (Local)")
-    st.markdown("""
-    Esta seção apresenta os dados processados a partir dos arquivos locais de Janeiro e Fevereiro de 2026.
-    Os gráficos abaixo foram gerados para análise rápida da evolução da campanha no Maranhão.
-    """)
-
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Comparativo Mensal")
-        path_mensal = "src/vacinação/graficos/comparativo_mensal.png"
-        if os.path.exists(path_mensal):
-            st.image(path_mensal)
-        else:
-            st.warning("Gráfico 'comparativo_mensal.png' não encontrado. Rode o script de visualização.")
-
-    with col2:
-        st.subheader("Distribuição por Sexo")
-        path_sexo = "src/vacinação/graficos/distribuicao_sexo.png"
-        if os.path.exists(path_sexo):
-            st.image(path_sexo)
-        else:
-            st.warning("Gráfico 'distribuicao_sexo.png' não encontrado.")
-
-    st.markdown("---")
-    
-    st.subheader("Top Grupos de Atendimento")
-    path_grupos = "src/vacinação/graficos/grupos_atendimento.png"
-    if os.path.exists(path_grupos):
-        st.image(path_grupos, use_container_width=True)
+                st.markdown("---")
+                st.subheader("🔝 Top 10 Grupos Prioritários")
+                df_grupos = (
+                    df_filtrado.group_by("ds_vacina_grupo_atendimento")
+                    .agg(pl.len().alias("Total de Doses"))
+                    .sort("Total de Doses", descending=True)
+                    .head(10)
+                    .rename({"ds_vacina_grupo_atendimento": "Grupo de Atendimento"})
+                    .sort("Total de Doses")
+                    .to_pandas()
+                )
+                st.plotly_chart(
+                    viz.barra_grupos_prioritarios_plotly(df_grupos),
+                    use_container_width=True,
+                )
+            else:
+                st.info(
+                    f"Nenhum dado encontrado para {ano_campanha} com os filtros atuais."
+                )
     else:
-        st.warning("Gráfico 'grupos_atendimento.png' não encontrado.")
-
-    st.markdown("---")
-    
-    st.subheader("Perfil Etário")
-    path_etario = "src/vacinação/graficos/perfil_etario.png"
-    if os.path.exists(path_etario):
-        st.image(path_etario, use_container_width=True)
-    else:
-        st.warning("Gráfico 'perfil_etario.png' não encontrado.")
+        st.info("Carregue os dados na barra lateral para visualizar.")

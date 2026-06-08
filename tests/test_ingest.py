@@ -39,5 +39,5 @@ def test_s3_config_exists():
 
 def test_colunas_pni():
     from config import COLUNAS_PNI
-    colunas_essenciais = {"dt_vacina", "ds_vacina", "sg_uf"}
+    colunas_essenciais = {"dt_vacina", "ds_vacina", "sg_uf_paciente"}
     assert colunas_essenciais.issubset(set(COLUNAS_PNI))
