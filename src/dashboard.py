@@ -131,7 +131,7 @@ def carregar_dados_pni(ufs):
                 for ano in [2025, 2026]:
                     cache_file = f"data/cache_pni_{ano}/uf_{uf}.parquet"
                     if os.path.exists(cache_file):
-                        dfs.append(pl.read_parquet(cache_file))
+                        dfs.append(pl.scan_parquet(cache_file))
                     else:
                         ufs_restantes.append(f"{uf} ({ano})")
 
@@ -141,10 +141,10 @@ def carregar_dados_pni(ufs):
             if dfs:
                 return pl.concat(dfs, how="vertical_relaxed")
             else:
-                return pl.DataFrame()
+                return None
     except Exception as e:
         st.error(f"Erro ao carregar PNI: {e}")
-        return pl.DataFrame()
+        return None
 
 
 # Carregar CSVs combinados
@@ -181,10 +181,10 @@ st.sidebar.markdown(
 dados_pni = carregar_dados_pni(uf_selecionadas)
 
 # Aplicar filtros
-if regiao_selecionada != "Todas" and not dados_pni.is_empty():
+if regiao_selecionada != "Todas" and dados_pni is not None:
     dados_pni = dados_pni.filter(pl.col("regiao") == regiao_selecionada)
 
-if faixa_etaria_selecionada and not dados_pni.is_empty():
+if faixa_etaria_selecionada and dados_pni is not None:
     dados_pni = dados_pni.filter(pl.col("faixa_etaria").is_in(faixa_etaria_selecionada))
 
 
@@ -230,7 +230,7 @@ with aba1:
         if not resultados.empty:
             df_st = resultados.groupby("mes_ano")["total_doses"].sum().reset_index()
             fig = viz.serie_temporal_plotly(df_st)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         else:
             st.info("Sem dados para série temporal")
 
@@ -242,30 +242,30 @@ with aba1:
             )
             df_uf.rename(columns={"sg_uf_paciente": "sg_uf"}, inplace=True)
             fig = viz.barra_cobertura_uf(df_uf, col_valor="total_doses")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         else:
             st.info("Sem dados para cobertura UF")
 
 with aba2:
     st.header("Perfil Demográfico (Baseado em UFs Selecionadas)")
 
-    if not dados_pni.is_empty():
+    if dados_pni is not None:
         c1, c2 = st.columns(2)
         with c1:
             st.subheader("Distribuição por Faixa Etária")
             df_fe = (
                 dados_pni.group_by("faixa_etaria").agg(pl.len().alias("total_doses"))
-            ).to_pandas()
-            st.plotly_chart(viz.barra_faixa_etaria(df_fe), use_container_width=True)
+            ).collect().to_pandas()
+            st.plotly_chart(viz.barra_faixa_etaria(df_fe), width="stretch")
 
         with c2:
             st.subheader("Distribuição por Sexo")
             df_sex = (
                 dados_pni.group_by("tp_sexo_paciente")
                 .agg(pl.len().alias("total_doses"))
-            ).to_pandas()
+            ).collect().to_pandas()
             df_sex.rename(columns={"tp_sexo_paciente": "co_sexo"}, inplace=True)
-            st.plotly_chart(viz.pizza_sexo(df_sex), use_container_width=True)
+            st.plotly_chart(viz.pizza_sexo(df_sex), width="stretch")
 
         st.subheader("Distribuição por Raça/Cor")
         mapa_raca = {
@@ -279,18 +279,20 @@ with aba2:
         df_raca = (
             dados_pni.group_by("co_raca_cor_paciente")
             .agg(pl.len().alias("total_doses"))
-        ).to_pandas()
+        ).collect().to_pandas()
         df_raca["raca_desc"] = (
             df_raca["co_raca_cor_paciente"].astype(str).map(mapa_raca).fillna("Outros")
         )
-        st.plotly_chart(viz.barra_raca(df_raca), use_container_width=True)
+        st.plotly_chart(viz.barra_raca(df_raca), width="stretch")
     else:
         st.info("Carregando ou sem dados para Demografia. Tente ajustar os filtros.")
 
 with aba3:
     st.header("Correlação Cobertura × Desfecho (Vacinas vs Internações/Óbitos)")
 
-    if not resultados.empty:
+    if "internacoes" not in resultados.columns:
+        st.warning("⚠️ Módulo PySUS (SIH/SIM) não instalado no ambiente (Incompatível com Python 3.14). Dados de Internações e Óbitos não disponíveis para análise de desfecho.")
+    elif not resultados.empty:
         c_esq, c_dir = st.columns(2)
         with c_esq:
             st.subheader("Cobertura × Internações")
@@ -309,7 +311,7 @@ with aba3:
                     inplace=True,
                 )
                 st.plotly_chart(
-                    viz.scatter_cobertura_desfecho(df_corr), use_container_width=True
+                    viz.scatter_cobertura_desfecho(df_corr), width="stretch"
                 )
             else:
                 st.info("Sem dados de internações")
@@ -331,7 +333,7 @@ with aba3:
                     inplace=True,
                 )
                 st.plotly_chart(
-                    viz.scatter_cobertura_desfecho(df_corr), use_container_width=True
+                    viz.scatter_cobertura_desfecho(df_corr), width="stretch"
                 )
             else:
                 st.info("Sem dados de óbitos")
@@ -345,7 +347,7 @@ with aba3:
             )
             st.plotly_chart(
                 viz.serie_dupla_plotly(df_dupla, y2="internacoes"),
-                use_container_width=True,
+                width="stretch",
             )
     else:
         st.info("Carregue os dados para visualizar")
@@ -353,7 +355,9 @@ with aba3:
 with aba4:
     st.header("Análise de Gaps (Gap Score)")
 
-    if not resultados.empty and "internacoes" in resultados.columns:
+    if "internacoes" not in resultados.columns:
+        st.warning("⚠️ Módulo PySUS (SIH/SIM) não instalado no ambiente. Impossível calcular o Gap Score sem dados de internação.")
+    elif not resultados.empty:
         c1, c2 = st.columns(2)
 
         # Calcular Gap Score On-The-Fly
@@ -373,10 +377,10 @@ with aba4:
 
         with c1:
             st.subheader("Gap Score por UF")
-            st.plotly_chart(viz.treemap_gaps(gap_df), use_container_width=True)
+            st.plotly_chart(viz.treemap_gaps(gap_df), width="stretch")
         with c2:
             st.subheader("Relação Doses x Gap")
-            st.plotly_chart(viz.bubble_gap_analysis(gap_df), use_container_width=True)
+            st.plotly_chart(viz.bubble_gap_analysis(gap_df), width="stretch")
 
     else:
         st.info("Sem dados suficientes para calcular Gaps.")
@@ -452,7 +456,7 @@ with aba5:
                 },
             )
             fig.update_layout(template="plotly_white")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
         with col_dir:
             st.subheader("Série Mensal Comparada")
@@ -470,7 +474,7 @@ with aba5:
                 labels={"mes_ano": "Mês", "total_doses": "Doses", "ano_vacina": "Ano"},
             )
             fig.update_layout(template="plotly_white", hovermode="x unified")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
         csv_buffer = io.StringIO()
         resultados.to_csv(csv_buffer, index=False)
@@ -486,53 +490,57 @@ with aba5:
 with aba6:
     ano_campanha = st.selectbox("Selecione o ano", ["2025", "2026", "Ambos"], index=0)
 
-    if not dados_pni.is_empty():
+    if dados_pni is not None:
         if ano_campanha == "Ambos":
             c_esq, c_dir = st.columns(2)
             with c_esq:
                 st.subheader("📈 2025")
                 df_a = dados_pni.filter(pl.col("ano_vacina") == 2025)
-                if not df_a.is_empty():
+                if df_a.select(pl.len()).collect().item() > 0:
                     st.plotly_chart(
                         viz.timeline_regiao_plotly(
                             df_a.group_by(["mes_ano", "regiao"])
                             .agg(pl.len().alias("total_doses"))
-                            .to_pandas()
+                            .sort("mes_ano")
+                            .collect().to_pandas()
                         ),
-                        use_container_width=True,
+                        width="stretch",
                     )
                     st.plotly_chart(
                         viz.barra_cobertura_regiao(
                             df_a.group_by("regiao").agg(pl.len().alias("Total de Doses"))
-                            .rename({"regiao": "Região"}).to_pandas()
-                        ), use_container_width=True
+                            .sort("Total de Doses", descending=True)
+                            .rename({"regiao": "Região"}).collect().to_pandas()
+                        ), width="stretch"
                     )
                 else:
                     st.info("Sem dados para 2025")
             with c_dir:
                 st.subheader("📈 2026")
                 df_b = dados_pni.filter(pl.col("ano_vacina") == 2026)
-                if not df_b.is_empty():
+                if df_b.select(pl.len()).collect().item() > 0:
                     st.plotly_chart(
                         viz.timeline_regiao_plotly(
                             df_b.group_by(["mes_ano", "regiao"])
                             .agg(pl.len().alias("total_doses"))
-                            .to_pandas()
+                            .sort("mes_ano")
+                            .collect().to_pandas()
                         ),
-                        use_container_width=True,
+                        width="stretch",
                     )
                     st.plotly_chart(
                         viz.barra_cobertura_regiao(
                             df_b.group_by("regiao").agg(pl.len().alias("Total de Doses"))
-                            .rename({"regiao": "Região"}).to_pandas()
-                        ), use_container_width=True
+                            .sort("Total de Doses", descending=True)
+                            .rename({"regiao": "Região"}).collect().to_pandas()
+                        ), width="stretch"
                     )
                 else:
                     st.info("Sem dados para 2026")
         else:
             ano = int(ano_campanha)
             df_filtrado = dados_pni.filter(pl.col("ano_vacina") == ano)
-            if not df_filtrado.is_empty():
+            if df_filtrado.select(pl.len()).collect().item() > 0:
                 col1, col2 = st.columns(2)
                 with col1:
                     st.subheader("📈 Tendência Temporal por Região")
@@ -540,18 +548,20 @@ with aba6:
                         viz.timeline_regiao_plotly(
                             df_filtrado.group_by(["mes_ano", "regiao"])
                             .agg(pl.len().alias("total_doses"))
-                            .to_pandas()
+                            .sort("mes_ano")
+                            .collect().to_pandas()
                         ),
-                        use_container_width=True,
+                        width="stretch",
                     )
                 with col2:
                     st.subheader("🗺️ Cobertura por Região")
                     st.plotly_chart(
                         viz.barra_cobertura_regiao(
                             df_filtrado.group_by("regiao").agg(pl.len().alias("Total de Doses"))
-                            .rename({"regiao": "Região"}).to_pandas()
+                            .sort("Total de Doses", descending=True)
+                            .rename({"regiao": "Região"}).collect().to_pandas()
                         ),
-                        use_container_width=True,
+                        width="stretch",
                     )
 
                 st.markdown("---")
@@ -562,11 +572,11 @@ with aba6:
                         df_filtrado.group_by("nu_idade_paciente")
                         .agg(pl.len().alias("Quantidade"))
                         .sort("nu_idade_paciente")
-                        .to_pandas()
+                        .collect().to_pandas()
                     )
                     st.plotly_chart(
                         viz.histograma_idade_plotly(df_idade),
-                        use_container_width=True,
+                        width="stretch",
                     )
                 with col4:
                     st.subheader("📦 Variabilidade Etária (Outliers)")
@@ -577,11 +587,11 @@ with aba6:
                             pl.col("nu_idade_paciente").median().alias("median"),
                             pl.col("nu_idade_paciente").quantile(0.75).alias("q3"),
                             pl.col("nu_idade_paciente").max().alias("max"),
-                        ).to_pandas()
+                        ).collect().to_pandas()
                     )
                     st.plotly_chart(
                         viz.boxplot_regioes_plotly(df_stats),
-                        use_container_width=True,
+                        width="stretch",
                     )
 
                 st.markdown("---")
@@ -593,11 +603,11 @@ with aba6:
                     .head(10)
                     .rename({"ds_vacina_grupo_atendimento": "Grupo de Atendimento"})
                     .sort("Total de Doses")
-                    .to_pandas()
+                    .collect().to_pandas()
                 )
                 st.plotly_chart(
                     viz.barra_grupos_prioritarios_plotly(df_grupos),
-                    use_container_width=True,
+                    width="stretch",
                 )
             else:
                 st.info(

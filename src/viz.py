@@ -98,14 +98,20 @@ def treemap_gaps(df: pd.DataFrame, nomes: str = "sg_uf", valores: str = "gap_sco
 
 
 def barra_faixa_etaria(df: pd.DataFrame) -> go.Figure:
+    ordem_faixas = ["0-4", "5-11", "12-17", "18-29", "30-39", "40-49", "50-59", "60+"]
     fig = px.bar(
         df, x="faixa_etaria", y="total_doses",
         title="Doses Aplicadas por Faixa Etária",
         labels={"faixa_etaria": "Faixa Etária", "total_doses": "Total de Doses"},
         color="total_doses",
         color_continuous_scale="Blues",
+        category_orders={"faixa_etaria": ordem_faixas},
+        text_auto=".2s" # Formata os números de forma legível em cima da barra
     )
-    fig.update_layout(template="plotly_white")
+    fig.update_layout(
+        template="plotly_white",
+        coloraxis_showscale=False # Remove a legenda contínua lateral que confunde
+    )
     return fig
 
 
