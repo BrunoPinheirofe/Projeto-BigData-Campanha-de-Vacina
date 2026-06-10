@@ -6,6 +6,8 @@ import io
 import polars as pl
 
 from config import UFS, REGIACOES, PERIODO_INICIO, PERIODO_FIM
+from ingest import load_pni_ufs
+from transform import prepara_pni_completo
 import viz
 
 # Estética Premium (Glassmorphism e gradientes)
@@ -124,19 +126,22 @@ def carregar_dados_pni(ufs):
             f"⏳ Carregando dados para {len(ufs)} UF(s): {', '.join(ufs)}..."
         ):
             dfs = []
-            ufs_restantes = []
-            
-            # Tentar ler dos caches parquets locais gerados pelo pipeline_paralelo
+            ufs_s3 = []
+
             for uf in ufs:
                 for ano in [2025, 2026]:
                     cache_file = f"data/cache_pni_{ano}/uf_{uf}.parquet"
                     if os.path.exists(cache_file):
                         dfs.append(pl.scan_parquet(cache_file))
                     else:
-                        ufs_restantes.append(f"{uf} ({ano})")
+                        ufs_s3.append(uf)
 
-            if ufs_restantes:
-                st.warning(f"⚠️ Atenção: Os dados de {len(ufs_restantes)} UFs/Anos ainda não foram gerados pelo pipeline. (Ex: {', '.join(ufs_restantes[:3])}...). Execute o 'pipeline_paralelo.py' para gerar o cache local.")
+            # Fallback: carrega direto do S3 para UFs sem cache local
+            if ufs_s3:
+                with st.spinner("🔄 Cache local não encontrado. Carregando do S3..."):
+                    table = load_pni_ufs(list(set(ufs_s3)))
+                    df_pni = prepara_pni_completo(table)
+                    dfs.append(pl.from_pandas(df_pni).lazy())
 
             if dfs:
                 return pl.concat(dfs, how="vertical_relaxed")
